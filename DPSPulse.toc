@@ -1,0 +1,8 @@
+## Interface: 20504
+## Title: DPSPulse
+## Notes: Realtime rolling DPS graph for outgoing damage.
+## Author: DPSPulse
+## Version: 0.1.0
+## SavedVariables: DPSPulseDB
+
+DPSPulse.lua
