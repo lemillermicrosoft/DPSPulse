@@ -197,6 +197,13 @@ end
 
 function DPSPulse:Sample()
     local currentTime = now()
+
+    if (not self.state.inCombat) and self.state.clearAt and currentTime >= self.state.clearAt then
+        self.state.clearAt = nil
+        self:ResetFightData()
+        return
+    end
+
     local currentDPS = self:ComputeRollingDPS(currentTime)
 
     local history = self.state.history
@@ -223,10 +230,6 @@ function DPSPulse:Sample()
         self.state.history = newHistory
     end
 
-    if (not self.state.inCombat) and self.state.clearAt and currentTime >= self.state.clearAt then
-        self.state.clearAt = nil
-        self:ResetFightData()
-    end
 end
 
 function DPSPulse:ClearSegments()
@@ -404,6 +407,10 @@ function DPSPulse:CreateUI()
     end)
 
     frame:SetScript("OnUpdate", function(_, elapsed)
+        if (not DPSPulse.state.inCombat) and (not DPSPulse.state.clearAt) then
+            return
+        end
+
         DPSPulse.state.sampleAccumulator = DPSPulse.state.sampleAccumulator + elapsed
         DPSPulse.state.renderAccumulator = DPSPulse.state.renderAccumulator + elapsed
 
