@@ -61,6 +61,7 @@ DPSPulse.state = {
     peakDPS = 0,
     sampleAccumulator = 0,
     renderAccumulator = 0,
+    logTimeOffset = nil,
 }
 
 DPSPulse.config = {
@@ -122,6 +123,7 @@ function DPSPulse:ResetFightData()
     self.state.history = {}
     self.state.peakDPS = 0
     self.state.fightStart = now()
+    self.state.logTimeOffset = nil
 end
 
 function DPSPulse:StartFight()
@@ -133,6 +135,19 @@ end
 function DPSPulse:EndFight()
     self.state.inCombat = false
     self.state.clearAt = now() + self.config.clearDelay
+end
+
+function DPSPulse:NormalizeEventTime(eventTimestamp)
+    local eventTime = tonumber(eventTimestamp)
+    if not eventTime then
+        return now()
+    end
+
+    if not self.state.logTimeOffset then
+        self.state.logTimeOffset = now() - eventTime
+    end
+
+    return eventTime + self.state.logTimeOffset
 end
 
 function DPSPulse:TrackDamage(eventTime, amount)
@@ -567,7 +582,7 @@ function DPSPulse:HandleCombatLogEvent(...)
     local amount = self:ParseDamageAmount(subEvent, arg12, arg13, arg14, arg15)
 
     if amount and amount > 0 then
-        self:TrackDamage(timestamp, amount)
+        self:TrackDamage(self:NormalizeEventTime(timestamp), amount)
     end
 end
 
