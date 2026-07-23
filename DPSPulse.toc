@@ -2,7 +2,7 @@
 ## Title: DPSPulse
 ## Notes: Realtime rolling DPS graph for outgoing damage.
 ## Author: DPSPulse
-## Version: 0.1.0
+## Version: 0.1.1
 ## IconTexture: Interface\AddOns\DPSPulse\Media\icon
 ## SavedVariables: DPSPulseDB
 
