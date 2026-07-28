@@ -42,7 +42,8 @@ param(
     [switch]$BumpMajor,
     [string]$SetVersion,
     [switch]$Validate,
-    [switch]$SkipLuaVersionSync
+    [switch]$SkipLuaVersionSync,
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -142,11 +143,15 @@ if ($SetVersion) {
 }
 
 if ($newVersion -ne $currentVersion) {
-    Write-Host ("[build-addon] Version {0} -> {1}" -f $currentVersion, $newVersion)
-    Update-TocVersion -TocPath $toc.FullName -NewVersion $newVersion
-    if (-not $SkipLuaVersionSync) {
-        $changed = Update-LuaVersions -RepoRoot $RepoRoot -NewVersion $newVersion
-        foreach ($c in $changed) { Write-Host ("[build-addon] Synced Lua VERSION in: {0}" -f (Resolve-Path -Relative $c)) }
+    if ($DryRun) {
+        Write-Host ("[build-addon] DryRun: would bump {0} -> {1} (TOC + Lua unchanged)" -f $currentVersion, $newVersion) -ForegroundColor Yellow
+    } else {
+        Write-Host ("[build-addon] Version {0} -> {1}" -f $currentVersion, $newVersion)
+        Update-TocVersion -TocPath $toc.FullName -NewVersion $newVersion
+        if (-not $SkipLuaVersionSync) {
+            $changed = Update-LuaVersions -RepoRoot $RepoRoot -NewVersion $newVersion
+            foreach ($c in $changed) { Write-Host ("[build-addon] Synced Lua VERSION in: {0}" -f (Resolve-Path -Relative $c)) }
+        }
     }
 }
 

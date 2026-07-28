@@ -72,6 +72,8 @@ if (-not $ReleaseType) {
 
 # Token
 $token = $env:CURSEFORGE_API_TOKEN
+if (-not $token) { $token = [Environment]::GetEnvironmentVariable('CURSEFORGE_API_TOKEN','User') }
+if (-not $token) { $token = [Environment]::GetEnvironmentVariable('CURSEFORGE_API_TOKEN','Machine') }
 if (-not $token) { throw "CURSEFORGE_API_TOKEN env var is not set." }
 
 # Zip

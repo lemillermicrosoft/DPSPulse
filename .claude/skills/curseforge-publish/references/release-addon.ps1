@@ -43,8 +43,20 @@ $here = $PSScriptRoot
 if (-not $here) { $here = Split-Path -Parent $MyInvocation.MyCommand.Path }
 if (-not $RepoRoot) { $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $here "..\..\..\..")).Path }
 
+# Refresh env from persistent scopes (User/Machine) in case shell started before token was set
+foreach ($v in 'CURSEFORGE_API_TOKEN') {
+    if (-not (Get-Item -Path "Env:$v" -ErrorAction SilentlyContinue).Value) {
+        $val = [Environment]::GetEnvironmentVariable($v,'User')
+        if (-not $val) { $val = [Environment]::GetEnvironmentVariable($v,'Machine') }
+        if ($val) { Set-Item -Path "Env:$v" -Value $val }
+    }
+}
+# Refresh PATH so gh is discoverable if installed after shell start
+$env:Path = ([Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User'))
+
 Write-Host "==== [release-addon] Build ====" -ForegroundColor Cyan
 $buildArgs = @{ RepoRoot = $RepoRoot; Validate = $true }
+if ($DryRun)     { $buildArgs.DryRun = $true }
 if ($BumpPatch)   { $buildArgs.BumpPatch = $true }
 if ($BumpMinor)   { $buildArgs.BumpMinor = $true }
 if ($BumpMajor)   { $buildArgs.BumpMajor = $true }
