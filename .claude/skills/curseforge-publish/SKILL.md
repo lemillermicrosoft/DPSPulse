@@ -36,6 +36,17 @@ Requires `.curseforge.json` in repo root (see below) and `$env:CURSEFORGE_API_TO
 .\.claude\skills\curseforge-publish\references\upload-curseforge.ps1 -DryRun
 ```
 
+### `auto-release.ps1` — hands-off release
+Infers major/minor/patch from git log since the last `v*` tag using conventional-commit heuristics (`BREAKING CHANGE`/`!` → major, `feat` → minor, everything else → patch), writes `CHANGELOG_RELEASE.md` grouped into Features/Fixes/Other, then delegates to `release-addon.ps1`.
+
+```powershell
+.\.claude\skills\curseforge-publish\references\auto-release.ps1 -DryRun
+.\.claude\skills\curseforge-publish\references\auto-release.ps1
+.\.claude\skills\curseforge-publish\references\auto-release.ps1 -ForceBump minor
+```
+
+Flags: `-ReleaseType release|beta|alpha` (default `release`), `-ForceBump major|minor|patch`, `-MinBump major|minor|patch` (default `patch`), `-DryRun`.
+
 ### `release-addon.ps1` — full pipeline
 Chains build → git commit/tag/push → GitHub release (via `gh`) → CurseForge upload.
 
