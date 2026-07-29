@@ -1,5 +1,5 @@
 {
-  "projectId": 1629924,
+  "projectId": 1622554,
   "gameVersions": ["2.5.6"],
   "releaseType": "release",
   "_comment": "projectId: find on CurseForge project page sidebar. gameVersions: names or slugs; resolved to IDs via API. Or use gameVersionIds: [12345] to bypass lookup."
