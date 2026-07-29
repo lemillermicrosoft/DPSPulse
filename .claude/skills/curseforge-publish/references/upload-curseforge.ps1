@@ -82,7 +82,11 @@ if (-not $ZipPath) {
     $ZipPath = (Get-ChildItem -LiteralPath $distDir -Filter *.zip -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
     if (-not $ZipPath) { throw "No zip found in $distDir." }
 }
+if (-not [IO.Path]::IsPathRooted($ZipPath)) {
+    $ZipPath = Join-Path $RepoRoot $ZipPath
+}
 if (-not (Test-Path -LiteralPath $ZipPath)) { throw "Zip not found: $ZipPath" }
+$ZipPath = (Resolve-Path -LiteralPath $ZipPath).Path
 Write-Host ("[cf-upload] Uploading: {0}" -f $ZipPath)
 
 if (-not $DisplayName) { $DisplayName = [IO.Path]::GetFileNameWithoutExtension($ZipPath) }
