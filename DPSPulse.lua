@@ -35,6 +35,42 @@ local function round(value)
     return math.floor(value + 0.5)
 end
 
+-- Linear interpolation between two colors at t in [0,1].
+local function lerp(a, b, t)
+    return a + (b - a) * t
+end
+
+-- Returns r,g,b for a heat gradient based on intensity in [0,1]:
+-- 0.00 blue -> 0.33 green -> 0.66 yellow -> 1.00 red.
+local function gradientColor(intensity)
+    if intensity ~= intensity then -- NaN guard
+        intensity = 0
+    end
+    if intensity < 0 then intensity = 0 end
+    if intensity > 1 then intensity = 1 end
+
+    -- Stops: {t, r, g, b}
+    local stops = {
+        { 0.00, 0.25, 0.55, 1.00 }, -- blue
+        { 0.33, 0.20, 0.95, 0.40 }, -- green (matches legacy line color)
+        { 0.66, 1.00, 0.90, 0.20 }, -- yellow
+        { 1.00, 1.00, 0.25, 0.20 }, -- red
+    }
+
+    for i = 1, #stops - 1 do
+        local s1 = stops[i]
+        local s2 = stops[i + 1]
+        if intensity <= s2[1] then
+            local span = s2[1] - s1[1]
+            local t = span > 0 and (intensity - s1[1]) / span or 0
+            return lerp(s1[2], s2[2], t), lerp(s1[3], s2[3], t), lerp(s1[4], s2[4], t)
+        end
+    end
+
+    local last = stops[#stops]
+    return last[2], last[3], last[4]
+end
+
 local function shallowCopy(src)
     local out = {}
     for key, value in pairs(src) do
@@ -326,6 +362,16 @@ function DPSPulse:RenderGraph()
         if dist < 0.01 then
             segment:Hide()
         else
+            -- Color this segment on a heat gradient based on its DPS relative to the
+            -- current visible max. Use the average of the two endpoints so the line
+            -- transitions smoothly from segment to segment.
+            local intensity = 0
+            if maxDPS > 0 then
+                intensity = clamp(((p1.dps + p2.dps) * 0.5) / maxDPS, 0, 1)
+            end
+            local r, g, b = gradientColor(intensity)
+            segment:SetColorTexture(r, g, b, 1)
+
             segment:ClearAllPoints()
             if self.ui.supportsRotation and segment.SetRotation then
                 segment:SetPoint("CENTER", graph, "BOTTOMLEFT", (x1 + x2) * 0.5, (y1 + y2) * 0.5)
