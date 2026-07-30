@@ -5,6 +5,8 @@ DPSPulse is a lightweight World of Warcraft addon that shows a realtime rolling 
 ## Features
 - Tracks outgoing player and pet damage from combat log events.
 - Computes rolling DPS over a configurable window (default: 10s).
+- **Dual-series graph:** rolling-window DPS (heat gradient) *and* full-combat session DPS (teal) plotted on the same axes, mimicking Details-style meter overlays. Session line stays live during combat and freezes on the last fight's total DPS when combat ends.
+- **Second readout** shows the session DPS number alongside the rolling number.
 - Draws a live graph with auto-scaled Y axis and a heat-gradient line (blue -> green -> yellow -> red) reflecting DPS intensity.
 - Shows current DPS and peak DPS.
 - Handles combat start/end and clears after leaving combat.

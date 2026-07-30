@@ -98,6 +98,14 @@ DPSPulse.state = {
     sampleAccumulator = 0,
     renderAccumulator = 0,
     logTimeOffset = nil,
+    -- Full-combat-session tracking (mirrors Details-style total DPS).
+    -- `totalDamage` accumulates from fightStart and is never trimmed.
+    -- `sessionDPS` is the *current* combat's DPS when in combat, or the
+    -- *last* combat's DPS when out of combat (frozen until next fight).
+    totalDamage = 0,
+    sessionDPS = 0,
+    sessionDuration = 0,
+    hasSession = false,
 }
 
 DPSPulse.config = {
@@ -160,6 +168,13 @@ function DPSPulse:ResetFightData()
     self.state.peakDPS = 0
     self.state.fightStart = now()
     self.state.logTimeOffset = nil
+    self.state.totalDamage = 0
+end
+
+function DPSPulse:ClearSession()
+    self.state.sessionDPS = 0
+    self.state.sessionDuration = 0
+    self.state.hasSession = false
 end
 
 function DPSPulse:StartFight()
@@ -171,6 +186,14 @@ end
 function DPSPulse:EndFight()
     self.state.inCombat = false
     self.state.clearAt = now() + self.config.clearDelay
+    -- Freeze the just-finished combat's total DPS so it stays on screen
+    -- until the next fight starts (Details-style "last fight" behavior).
+    local duration = now() - (self.state.fightStart or now())
+    if duration > 0 and self.state.totalDamage > 0 then
+        self.state.sessionDPS = self.state.totalDamage / duration
+        self.state.sessionDuration = duration
+        self.state.hasSession = true
+    end
 end
 
 function DPSPulse:NormalizeEventTime(eventTimestamp)
@@ -190,6 +213,9 @@ function DPSPulse:TrackDamage(eventTime, amount)
     if not amount or amount <= 0 then
         return
     end
+
+    -- Session-total counter is unbounded across the fight (used for full-combat DPS).
+    self.state.totalDamage = (self.state.totalDamage or 0) + amount
 
     local step = self.config.bucketStep
     local bucketTime = math.floor(eventTime / step) * step
@@ -246,6 +272,22 @@ function DPSPulse:ComputeRollingDPS(currentTime)
     return sum / divisor
 end
 
+function DPSPulse:ComputeSessionDPS(currentTime)
+    if self.state.inCombat then
+        local elapsed = currentTime - (self.state.fightStart or currentTime)
+        if elapsed <= 0 then
+            return 0, 0
+        end
+        return (self.state.totalDamage or 0) / elapsed, elapsed
+    end
+
+    if self.state.hasSession then
+        return self.state.sessionDPS or 0, self.state.sessionDuration or 0
+    end
+
+    return 0, 0
+end
+
 function DPSPulse:Sample()
     local currentTime = now()
 
@@ -256,9 +298,10 @@ function DPSPulse:Sample()
     end
 
     local currentDPS = self:ComputeRollingDPS(currentTime)
+    local sessionDPS = self:ComputeSessionDPS(currentTime)
 
     local history = self.state.history
-    history[#history + 1] = { t = currentTime, dps = currentDPS }
+    history[#history + 1] = { t = currentTime, dps = currentDPS, session = sessionDPS }
 
     if currentDPS > self.state.peakDPS then
         self.state.peakDPS = currentDPS
@@ -286,6 +329,65 @@ end
 function DPSPulse:ClearSegments()
     local segments = self.ui.segments
     for i = 1, #segments do
+        segments[i]:Hide()
+    end
+    local sessionSegments = self.ui.sessionSegments
+    if sessionSegments then
+        for i = 1, #sessionSegments do
+            sessionSegments[i]:Hide()
+        end
+    end
+end
+
+-- Draw one polyline series into a pre-allocated segment pool.
+-- valueFn(point) -> dps value for this series at this sample.
+-- colorFn(p1, p2, maxDPS) -> r,g,b,a for the segment between p1 and p2.
+-- Returns the next segment index to hide.
+function DPSPulse:RenderSeries(points, segments, graph, graphWidth, graphHeight, minTime, historySeconds, maxDPS, valueFn, colorFn)
+    local segmentIndex = 1
+
+    for i = 2, #points do
+        local p1 = points[i - 1]
+        local p2 = points[i]
+        local v1 = valueFn(p1) or 0
+        local v2 = valueFn(p2) or 0
+
+        local x1 = ((p1.t - minTime) / historySeconds) * graphWidth
+        local y1 = (clamp(v1 / maxDPS, 0, 1)) * graphHeight
+        local x2 = ((p2.t - minTime) / historySeconds) * graphWidth
+        local y2 = (clamp(v2 / maxDPS, 0, 1)) * graphHeight
+
+        local dx = x2 - x1
+        local dy = y2 - y1
+        local dist = math.sqrt(dx * dx + dy * dy)
+
+        local segment = segments[segmentIndex]
+        if not segment then
+            break
+        end
+
+        if dist < 0.01 then
+            segment:Hide()
+        else
+            local r, g, b, a = colorFn(v1, v2, maxDPS)
+            segment:SetColorTexture(r, g, b, a or 1)
+
+            segment:ClearAllPoints()
+            if self.ui.supportsRotation and segment.SetRotation then
+                segment:SetPoint("CENTER", graph, "BOTTOMLEFT", (x1 + x2) * 0.5, (y1 + y2) * 0.5)
+                segment:SetSize(dist, 2)
+                segment:SetRotation(math.atan2(dy, dx))
+            else
+                segment:SetPoint("BOTTOMLEFT", graph, "BOTTOMLEFT", math.min(x1, x2), y2)
+                segment:SetSize(math.max(1, math.abs(dx)), 2)
+            end
+            segment:Show()
+        end
+
+        segmentIndex = segmentIndex + 1
+    end
+
+    for i = segmentIndex, #segments do
         segments[i]:Hide()
     end
 end
@@ -322,6 +424,10 @@ function DPSPulse:RenderGraph()
             if point.dps > maxDPS then
                 maxDPS = point.dps
             end
+            local sessionVal = point.session or 0
+            if sessionVal > maxDPS then
+                maxDPS = sessionVal
+            end
         end
     end
 
@@ -338,58 +444,28 @@ function DPSPulse:RenderGraph()
         self.ui.maxLabel:SetText("Max: " .. tostring(round(maxDPS)))
     end
 
-    local segments = self.ui.segments
-    local segmentIndex = 1
-
-    for i = 2, #points do
-        local p1 = points[i - 1]
-        local p2 = points[i]
-
-        local x1 = ((p1.t - minTime) / historySeconds) * graphWidth
-        local y1 = (clamp(p1.dps / maxDPS, 0, 1)) * graphHeight
-        local x2 = ((p2.t - minTime) / historySeconds) * graphWidth
-        local y2 = (clamp(p2.dps / maxDPS, 0, 1)) * graphHeight
-
-        local dx = x2 - x1
-        local dy = y2 - y1
-        local dist = math.sqrt(dx * dx + dy * dy)
-
-        local segment = segments[segmentIndex]
-        if not segment then
-            break
-        end
-
-        if dist < 0.01 then
-            segment:Hide()
-        else
-            -- Color this segment on a heat gradient based on its DPS relative to the
-            -- current visible max. Use the average of the two endpoints so the line
-            -- transitions smoothly from segment to segment.
+    -- Rolling series: heat-gradient color per segment (existing behavior).
+    self:RenderSeries(
+        points, self.ui.segments, graph, graphWidth, graphHeight,
+        minTime, historySeconds, maxDPS,
+        function(p) return p.dps end,
+        function(v1, v2, m)
             local intensity = 0
-            if maxDPS > 0 then
-                intensity = clamp(((p1.dps + p2.dps) * 0.5) / maxDPS, 0, 1)
+            if m > 0 then
+                intensity = clamp(((v1 + v2) * 0.5) / m, 0, 1)
             end
             local r, g, b = gradientColor(intensity)
-            segment:SetColorTexture(r, g, b, 1)
-
-            segment:ClearAllPoints()
-            if self.ui.supportsRotation and segment.SetRotation then
-                segment:SetPoint("CENTER", graph, "BOTTOMLEFT", (x1 + x2) * 0.5, (y1 + y2) * 0.5)
-                segment:SetSize(dist, 2)
-                segment:SetRotation(math.atan2(dy, dx))
-            else
-                segment:SetPoint("BOTTOMLEFT", graph, "BOTTOMLEFT", math.min(x1, x2), y2)
-                segment:SetSize(math.max(1, math.abs(dx)), 2)
-            end
-            segment:Show()
+            return r, g, b, 1
         end
+    )
 
-        segmentIndex = segmentIndex + 1
-    end
-
-    for i = segmentIndex, #segments do
-        segments[i]:Hide()
-    end
+    -- Session series: flat teal, slightly transparent so it reads as "average".
+    self:RenderSeries(
+        points, self.ui.sessionSegments, graph, graphWidth, graphHeight,
+        minTime, historySeconds, maxDPS,
+        function(p) return p.session or 0 end,
+        function() return 0.55, 0.85, 1.0, 0.85 end
+    )
 end
 
 function DPSPulse:UpdateTexts()
@@ -397,8 +473,20 @@ function DPSPulse:UpdateTexts()
         return
     end
 
-    local currentDPS = self:ComputeRollingDPS(now())
+    local currentTime = now()
+    local currentDPS = self:ComputeRollingDPS(currentTime)
     self.ui.dpsText:SetText(string.format("%d DPS", round(currentDPS)))
+
+    if self.ui.sessionText then
+        local sessionDPS, sessionDuration = self:ComputeSessionDPS(currentTime)
+        if self.state.inCombat then
+            self.ui.sessionText:SetText(string.format("Session %d", round(sessionDPS)))
+        elseif self.state.hasSession then
+            self.ui.sessionText:SetText(string.format("Last %d (%.1fs)", round(sessionDPS), sessionDuration))
+        else
+            self.ui.sessionText:SetText("Session 0")
+        end
+    end
 
     if self.ui.peakText then
         self.ui.peakText:SetText(string.format("Peak %d", round(self.state.peakDPS)))
@@ -509,6 +597,16 @@ function DPSPulse:CreateUI()
     dpsText:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -30)
     dpsText:SetText("0 DPS")
 
+    -- Second line: full-combat / "session" DPS — mimics Details "total fight DPS".
+    -- Shown as a number alongside the graph *and* plotted as a second series on
+    -- the same axes. While in combat this is current-fight DPS; when out of
+    -- combat it shows the last completed fight's DPS + duration.
+    local sessionText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    sessionText:SetTextColor(0.55, 0.85, 1.0, 1) -- teal, matches the session line
+    sessionText:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -30)
+    sessionText:SetJustifyH("RIGHT")
+    sessionText:SetText("Session 0")
+
     local peakText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     peakText:SetPoint("TOPLEFT", dpsText, "BOTTOMLEFT", 0, -4)
     peakText:SetText("Peak 0")
@@ -553,12 +651,43 @@ function DPSPulse:CreateUI()
         segments[i] = segment
     end
 
+    -- Second polyline pool for the full-combat session series (rendered on the
+    -- same axes as the rolling series). Drawn at a lower texture layer so the
+    -- rolling line reads as the "primary" reading.
+    local sessionSegments = {}
+    for i = 1, segmentCount do
+        local segment = graph:CreateTexture(nil, "ARTWORK")
+        segment:SetColorTexture(0.55, 0.85, 1.0, 0.85)
+        segment:SetSize(1, 2)
+        segment:Hide()
+        sessionSegments[i] = segment
+    end
+
+    -- Legend: rolling (heat gradient shown as green swatch) + session (teal).
+    local legendRoll = graph:CreateTexture(nil, "OVERLAY")
+    legendRoll:SetColorTexture(0.2, 0.95, 0.4, 1)
+    legendRoll:SetSize(10, 2)
+    legendRoll:SetPoint("TOPLEFT", graph, "TOPLEFT", 2, -2)
+    local legendRollText = graph:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    legendRollText:SetPoint("LEFT", legendRoll, "RIGHT", 4, 0)
+    legendRollText:SetText("Rolling")
+
+    local legendSess = graph:CreateTexture(nil, "OVERLAY")
+    legendSess:SetColorTexture(0.55, 0.85, 1.0, 0.85)
+    legendSess:SetSize(10, 2)
+    legendSess:SetPoint("TOPLEFT", graph, "TOPLEFT", 62, -2)
+    local legendSessText = graph:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    legendSessText:SetPoint("LEFT", legendSess, "RIGHT", 4, 0)
+    legendSessText:SetText("Session")
+
     self.ui.frame = frame
     self.ui.graph = graph
     self.ui.dpsText = dpsText
+    self.ui.sessionText = sessionText
     self.ui.peakText = peakText
     self.ui.maxLabel = maxLabel
     self.ui.segments = segments
+    self.ui.sessionSegments = sessionSegments
     self.ui.supportsRotation = supportsRotation
 
     self:ApplyPosition()
@@ -652,6 +781,7 @@ function DPSPulse:HandleSlash(msg)
 
     if command == "reset" then
         self:ResetFightData()
+        self:ClearSession()
         self:UpdateTexts()
         self:RenderGraph()
         chat("Current fight data reset.")
